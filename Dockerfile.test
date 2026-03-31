@@ -1,0 +1,22 @@
+# Imagen ligera para correr los tests unitarios.
+# NO necesita GDAL ni Chromium — los tests usan mocks/stubs.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Solo las dependencias que los tests realmente usan
+RUN pip install --no-cache-dir \
+    selenium>=4.18 \
+    numpy>=1.26 \
+    requests>=2.31 \
+    pymongo>=4.6 \
+    minio>=7.2 \
+    python-dotenv>=1.0 \
+    pytest>=8.0 \
+    pytest-mock>=3.12
+
+# Copiar el código fuente
+COPY chirps_ingestor/ ./chirps_ingestor/
+COPY tests/ ./tests/
+
+CMD ["pytest", "tests/", "-v", "--tb=short"]

@@ -32,6 +32,28 @@ services:
         echo 'Bucket chirps creado.';
       "
 
+  # Corre los tests unitarios (no requiere GDAL ni Chromium)
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - ./chirps_ingestor:/app/chirps_ingestor
+      - ./tests:/app/tests
+    command: ["pytest", "tests/", "-v", "--tb=short"]
+    profiles: ["test"]   # solo corre con: docker compose --profile test up tests
+
+  # Ingestor completo (requiere shapefiles montados)
+  ingestor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on: [mongo, minio, minio-init]
+    env_file: .env
+    volumes:
+      - ./shapefiles:/app/shapefiles
+    profiles: ["ingest"]  # solo corre con: docker compose --profile ingest up ingestor
+
 volumes:
   mongo_data:
   minio_data:
