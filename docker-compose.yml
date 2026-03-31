@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+    volumes: [mongo_data:/data/db]
+    environment:
+      MONGO_INITDB_DATABASE: chirps_catalog
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Console web: http://localhost:9001
+    environment:
+      MINIO_ROOT_USER: chirps_admin
+      MINIO_ROOT_PASSWORD: chirps_local_pass
+    command: server /data --console-address ":9001"
+    volumes: [minio_data:/data]
+
+  # Crea el bucket automáticamente al arrancar
+  minio-init:
+    image: minio/mc
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+        sleep 3;
+        mc alias set local http://minio:9000 chirps_admin chirps_local_pass;
+        mc mb --ignore-existing local/chirps;
+        echo 'Bucket chirps creado.';
+      "
+
+volumes:
+  mongo_data:
+  minio_data:
