@@ -1,0 +1,17 @@
+# Dependencias completas para correr el ingestor en local con Python 3.12.
+# GDAL debe estar instalado via conda: conda install -c conda-forge gdal rasterio fiona
+#
+# Instalar con:
+#   pip install -r requirements.txt
+
+selenium>=4.18
+rasterio>=1.3
+fiona>=1.9
+shapely>=2.0
+numpy>=1.26
+requests>=2.31
+pymongo>=4.6
+minio>=7.2
+python-dotenv>=1.0
+pytest>=8.0
+pytest-mock>=3.12
