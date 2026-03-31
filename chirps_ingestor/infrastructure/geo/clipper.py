@@ -4,24 +4,27 @@ import gzip
 import shutil
 import hashlib
 import tempfile
+import time
 
 import numpy as np
-import requests
 import rasterio
 from rasterio.mask import mask
 import fiona
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 from ...domain.models import CountryConfig
 from ...domain.ports import GeoClipperPort
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks para descarga
+DOWNLOAD_TIMEOUT_SECONDS = 300  # 5 minutos para archivos grandes
 
 
 class RasterioClipper(GeoClipperPort):
     """
-    1. Descarga el archivo .tif.gz desde la URL
+    1. Descarga el archivo .tif.gz usando Chrome headless (mismo DNS que el navegador)
     2. Descomprime el .gz
     3. Corta el GeoTIFF global usando el shapefile del país
     4. Guarda el resultado como GeoTIFF comprimido (LZW)
@@ -29,15 +32,16 @@ class RasterioClipper(GeoClipperPort):
 
     def clip(self, url: str, output_path: str, country_config: CountryConfig) -> str:
         """
-        Descarga desde url, corta por shapefile del país,
+        Descarga desde url via Selenium, corta por shapefile del país,
         guarda en output_path. Retorna el checksum MD5 del output.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
-            gz_path = os.path.join(tmp_dir, "raw.tif.gz")
+            filename = url.split("/")[-1]
+            gz_path = os.path.join(tmp_dir, filename)
             tif_raw_path = os.path.join(tmp_dir, "raw.tif")
 
-            logger.info(f"  Descargando: {url}")
-            self._download(url, gz_path)
+            logger.info(f"  Descargando via Chrome: {url}")
+            self._download_with_selenium(url, filename, tmp_dir)
 
             # Descomprimir si es .gz
             if url.endswith(".gz"):
@@ -66,13 +70,48 @@ class RasterioClipper(GeoClipperPort):
         logger.info(f"  Guardado en: {output_path} (md5: {checksum[:8]}...)")
         return checksum
 
-    def _download(self, url: str, dest_path: str):
-        """Descarga con streaming para archivos grandes."""
-        with requests.get(url, stream=True, timeout=120) as r:
-            r.raise_for_status()
-            with open(dest_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
-                    f.write(chunk)
+    def _download_with_selenium(self, url: str, filename: str, download_dir: str):
+        """
+        Usa Chrome headless para descargar el archivo al directorio indicado.
+        Chrome resuelve DNS igual que el navegador del usuario.
+        """
+        abs_download_dir = os.path.abspath(download_dir)
+
+        options = Options()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_experimental_option("prefs", {
+            "download.default_directory": abs_download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": False,
+        })
+
+        driver = webdriver.Chrome(options=options)
+        try:
+            driver.get(url)
+
+            # Esperar a que el archivo aparezca y no tenga extensión .crdownload
+            expected = os.path.join(abs_download_dir, filename)
+            elapsed = 0
+            while elapsed < DOWNLOAD_TIMEOUT_SECONDS:
+                crdownload = expected + ".crdownload"
+                if os.path.exists(expected) and not os.path.exists(crdownload):
+                    size_mb = os.path.getsize(expected) / (1024 * 1024)
+                    logger.info(f"  Descarga completada: {filename} ({size_mb:.1f} MB)")
+                    return
+                time.sleep(2)
+                elapsed += 2
+                if elapsed % 20 == 0:
+                    logger.info(f"  Esperando descarga... {elapsed}s/{DOWNLOAD_TIMEOUT_SECONDS}s")
+
+            raise TimeoutError(
+                f"Descarga no completada en {DOWNLOAD_TIMEOUT_SECONDS}s: {url}"
+            )
+        finally:
+            driver.quit()
 
     def _load_shapes(self, shapefile_path: str) -> list:
         """Carga las geometrías del shapefile."""
