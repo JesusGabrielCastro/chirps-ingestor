@@ -9,7 +9,7 @@ class Colombia(BaseCountry):
         return CountryConfig(
             name="colombia",
             code="CO",
-            shapefile_path="shapefiles/colombia/colombia.shp",
+            shapefile_path="shapefiles/colombia/gadm41_COL_0.shp",
             # Bounding box: cubre el territorio continental + islas
             bbox=(-79.0, -4.5, -66.8, 13.4),
             temporalities=[
