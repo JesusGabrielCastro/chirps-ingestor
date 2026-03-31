@@ -1,0 +1,7 @@
+# Dependencias mínimas para correr los tests en local.
+# No requiere GDAL, rasterio, fiona ni Chromium.
+# Compatible con Python 3.14.
+pytest>=8.0
+pytest-mock>=3.12
+selenium>=4.18
+python-dotenv>=1.0
