@@ -29,6 +29,7 @@ from chirps_ingestor.infrastructure.scraper.dekad_scraper import DekadScraper
 from chirps_ingestor.infrastructure.scraper.monthly_scraper import MonthlyScraper
 from chirps_ingestor.infrastructure.geo.clipper import RasterioClipper
 from chirps_ingestor.infrastructure.storage.minio_client import MinioStorage
+from chirps_ingestor.infrastructure.storage.shapefile_downloader import download_shapefile
 from chirps_ingestor.infrastructure.catalog.mongo_catalog import MongoCatalog
 from chirps_ingestor.application.ingest_orchestrator import IngestOrchestrator
 from chirps_ingestor.domain.models import Temporality
@@ -83,6 +84,12 @@ def main():
         if args.countries
         else get_all_countries()
     )
+
+    # Descargar shapefiles desde MinIO a tmp/ antes de procesar
+    countries = [
+        download_shapefile(storage._client, settings.MINIO_BUCKET, c)
+        for c in countries
+    ]
 
     target_temporalities = args.temporalities or [t.value for t in Temporality]
 
