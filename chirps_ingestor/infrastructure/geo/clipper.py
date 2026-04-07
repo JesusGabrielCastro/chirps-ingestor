@@ -19,7 +19,7 @@ from ...domain.ports import GeoClipperPort
 
 logger = logging.getLogger(__name__)
 
-DOWNLOAD_TIMEOUT_SECONDS = 300  # 5 minutos para archivos grandes
+DOWNLOAD_TIMEOUT_SECONDS = 2100  # 35 min — cálculo: 20 MB / 10 KB/s mínimo = 2048s
 
 
 class RasterioClipper(GeoClipperPort):
@@ -72,9 +72,15 @@ class RasterioClipper(GeoClipperPort):
 
     def _download_with_selenium(self, url: str, filename: str, download_dir: str):
         """
-        Usa Chrome headless + CDP para descargar el archivo al directorio indicado.
-        CDP (Browser.setDownloadBehavior) es necesario en modo headless — las prefs
-        de perfil no son suficientes para activar descargas en --headless=new.
+        Descarga un archivo usando Chrome headless + CDP.
+
+        Flujo:
+          1. CDP Browser.setDownloadBehavior → redirige descargas al directorio indicado
+          2. Navega a una página en blanco (para tener contexto DOM)
+          3. Crea un <a href=url download=filename> y hace click
+             → Chrome trata el click en un anchor con 'download' como descarga,
+               no como navegación, lo que dispara el comportamiento CDP correctamente
+          4. Espera a que aparezca el archivo (sin .crdownload activo)
         """
         abs_download_dir = os.path.abspath(download_dir)
 
@@ -89,20 +95,33 @@ class RasterioClipper(GeoClipperPort):
 
         driver = webdriver.Chrome(options=options)
         try:
-            # Activar descargas via CDP — imprescindible en headless
+            # Paso 1: activar descargas via CDP
             driver.execute_cdp_cmd(
                 "Browser.setDownloadBehavior",
                 {
                     "behavior": "allow",
                     "downloadPath": abs_download_dir,
-                    "eventsEnabled": True,
                 },
             )
 
-            logger.info(f"  Chrome navegando a: {url}")
-            driver.get(url)
+            # Paso 2: página en blanco para tener un DOM disponible
+            driver.get("data:text/html,<html><body></body></html>")
 
-            # Esperar a que el archivo aparezca y no tenga extensión .crdownload
+            # Paso 3: disparar la descarga via anchor click
+            logger.info(f"  Chrome descargando: {filename}")
+            driver.execute_script(
+                """
+                var a = document.createElement('a');
+                a.href = arguments[0];
+                a.download = arguments[1];
+                document.body.appendChild(a);
+                a.click();
+                """,
+                url,
+                filename,
+            )
+
+            # Paso 4: esperar a que el archivo exista y no esté en progreso
             expected = os.path.join(abs_download_dir, filename)
             elapsed = 0
             while elapsed < DOWNLOAD_TIMEOUT_SECONDS:
