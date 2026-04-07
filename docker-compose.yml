@@ -2,8 +2,11 @@ version: '3.9'
 
 services:
 
+  # ── Infraestructura ─────────────────────────────────────────────────────────
+
   mongo:
     image: mongo:7
+    restart: unless-stopped
     ports: ["27017:27017"]
     volumes: [mongo_data:/data/db]
     environment:
@@ -11,28 +14,52 @@ services:
 
   minio:
     image: minio/minio
+    restart: unless-stopped
     ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # Console web: http://localhost:9001
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web → http://localhost:9001
     environment:
-      MINIO_ROOT_USER: chirps_admin
-      MINIO_ROOT_PASSWORD: chirps_local_pass
+      MINIO_ROOT_USER: ${MINIO_USER:-chirps_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-chirps_local_pass}
     command: server /data --console-address ":9001"
     volumes: [minio_data:/data]
 
-  # Crea el bucket automáticamente al arrancar
   minio-init:
     image: minio/mc
     depends_on: [minio]
     entrypoint: >
       /bin/sh -c "
         sleep 3;
-        mc alias set local http://minio:9000 chirps_admin chirps_local_pass;
-        mc mb --ignore-existing local/chirps;
-        echo 'Bucket chirps creado.';
+        mc alias set local http://minio:9000 ${MINIO_USER:-chirps_admin} ${MINIO_PASSWORD:-chirps_local_pass};
+        mc mb --ignore-existing local/${MINIO_BUCKET:-chirps};
+        echo 'Bucket listo.';
       "
 
-  # Corre los tests unitarios (no requiere GDAL ni Chromium)
+  # ── Ingestor ─────────────────────────────────────────────────────────────────
+  # Uso:
+  #   docker compose run --rm ingestor python scripts/run_ingest.py --countries colombia --temporalities monthly
+  #   docker compose run --rm ingestor python scripts/run_backfill.py --countries colombia --start-year 2015 --end-year 2024
+  #   docker compose run --rm ingestor python scripts/check_status.py
+
+  ingestor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - mongo
+      - minio
+    env_file: .env
+    environment:
+      # Dentro del contenedor, MinIO y Mongo se llegan por nombre de servicio
+      MINIO_URL: minio:9000
+      MONGODB_URL: mongodb://mongo:27017
+    volumes:
+      - tmp_data:/app/tmp   # shapefiles y descargas temporales persisten entre runs
+    # Sin command — se pasa al hacer docker compose run
+
+  # ── Tests unitarios (sin GDAL ni Chrome) ────────────────────────────────────
+  # Uso: docker compose run --rm tests
+
   tests:
     build:
       context: .
@@ -41,19 +68,8 @@ services:
       - ./chirps_ingestor:/app/chirps_ingestor
       - ./tests:/app/tests
     command: ["pytest", "tests/", "-v", "--tb=short"]
-    profiles: ["test"]   # solo corre con: docker compose --profile test up tests
-
-  # Ingestor completo (requiere shapefiles montados)
-  ingestor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    depends_on: [mongo, minio, minio-init]
-    env_file: .env
-    volumes:
-      - ./shapefiles:/app/shapefiles
-    profiles: ["ingest"]  # solo corre con: docker compose --profile ingest up ingestor
 
 volumes:
   mongo_data:
   minio_data:
+  tmp_data:    # volumen nombrado para persistir tmp/ entre ejecuciones del ingestor
