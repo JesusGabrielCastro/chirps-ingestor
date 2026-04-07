@@ -72,8 +72,9 @@ class RasterioClipper(GeoClipperPort):
 
     def _download_with_selenium(self, url: str, filename: str, download_dir: str):
         """
-        Usa Chrome headless para descargar el archivo al directorio indicado.
-        Chrome resuelve DNS igual que el navegador del usuario.
+        Usa Chrome headless + CDP para descargar el archivo al directorio indicado.
+        CDP (Browser.setDownloadBehavior) es necesario en modo headless — las prefs
+        de perfil no son suficientes para activar descargas en --headless=new.
         """
         abs_download_dir = os.path.abspath(download_dir)
 
@@ -85,15 +86,20 @@ class RasterioClipper(GeoClipperPort):
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-setuid-sandbox")
-        options.add_experimental_option("prefs", {
-            "download.default_directory": abs_download_dir,
-            "download.prompt_for_download": False,
-            "download.directory_upgrade": True,
-            "safebrowsing.enabled": False,
-        })
 
         driver = webdriver.Chrome(options=options)
         try:
+            # Activar descargas via CDP — imprescindible en headless
+            driver.execute_cdp_cmd(
+                "Browser.setDownloadBehavior",
+                {
+                    "behavior": "allow",
+                    "downloadPath": abs_download_dir,
+                    "eventsEnabled": True,
+                },
+            )
+
+            logger.info(f"  Chrome navegando a: {url}")
             driver.get(url)
 
             # Esperar a que el archivo aparezca y no tenga extensión .crdownload
